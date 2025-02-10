@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VDO.Ninja Link Manager Documentation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2, h3 {
+            color: #333;
+        }
+        .class-doc {
+            margin-bottom: 40px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+        .method-doc {
+            margin: 20px 0;
+            padding-left: 20px;
+            border-left: 3px solid #ddd;
+        }
+        code {
+            background-color: #eee;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>VDO.Ninja Link Manager Documentation</h1>
+    
+    <h2>Overview</h2>
+    <p>
+        The VDO.Ninja Link Manager is a Python application that helps manage and generate links for VDO.Ninja video rooms.
+        It provides a graphical interface for configuring rooms, managing participants, and integrating with OBS Studio.
+    </p>
+
+    <h2>Class Structure</h2>
+
+    <div class="class-doc">
+        <h3>URLManager</h3>
+        <p>Handles all URL-related operations and parameter management.</p>
+        
+        <div class="method-doc">
+            <h4>generate_room_name(host: str, password: str) -> str</h4>
+            <p>Generates a consistent room name from host and password.</p>
+        </div>
+        
+        <div class="method-doc">
+            <h4>build_url(params: dict) -> str</h4>
+            <p>Builds a VDO.Ninja URL from parameters, handling special cases like standalone parameters.</p>
+        </div>
+    </div>
+
+    <div class="class-doc">
+        <h3>SettingsManager</h3>
+        <p>Manages application settings and configuration persistence.</p>
+        
+        <div class="method-doc">
+            <h4>save_to_file(filename: str = "config.json") -> None</h4>
+            <p>Saves current settings to a JSON file.</p>
+        </div>
+        
+        <div class="method-doc">
+            <h4>load_from_file(filename: str = "config.json") -> None</h4>
+            <p>Loads settings from a JSON file.</p>
+        </div>
+    </div>
+
+    <div class="class-doc">
+        <h3>PlayerManager</h3>
+        <p>Manages player information and OBS source generation.</p>
+        
+        <div class="method-doc">
+            <h4>parse_player_info(player_info: str) -> List[Player]</h4>
+            <p>Parses player information from text input in the format "username,character_name".</p>
+        </div>
+        
+        <div class="method-doc">
+            <h4>generate_push_id(room_name: str, username: str, char_name: str) -> str</h4>
+            <p>Generates a permanent, unique push ID for a player.</p>
+        </div>
+    </div>
+
+    <div class="class-doc">
+        <h3>OBSManager</h3>
+        <p>Handles OBS WebSocket integration and source updates.</p>
+        
+        <div class="method-doc">
+            <h4>connect(host: str = "localhost", port: int = 4444, password: Optional[str] = None) -> bool</h4>
+            <p>Establishes connection to OBS WebSocket.</p>
+        </div>
+        
+        <div class="method-doc">
+            <h4>update_text_source(source_name: str, text: str) -> bool</h4>
+            <p>Updates an OBS text source with new content.</p>
+        </div>
+    </div>
+
+    <div class="class-doc">
+        <h3>UI Components</h3>
+        <p>Reusable UI components for the application.</p>
+        
+        <div class="method-doc">
+            <h4>ScrollableFrame</h4>
+            <p>A frame that can scroll its contents when they exceed the visible area.</p>
+        </div>
+        
+        <div class="method-doc">
+            <h4>LinkButton</h4>
+            <p>A button that copies its associated link to the clipboard when clicked.</p>
+        </div>
+        
+        <div class="method-doc">
+            <h4>SettingsDialog</h4>
+            <p>Dialog for configuring application settings with tabs for different categories.</p>
+        </div>
+    </div>
+
+    <h2>Application Controls</h2>
+    
+    <div class="class-doc">
+        <h3>Top Bar Buttons</h3>
+        
+        <div class="method-doc">
+            <h4>Save Room</h4>
+            <p>Saves the current room configuration to a JSON file. The file will be named using the room name with "_room.json" suffix.</p>
+            <p>Saved information includes:</p>
+            <ul>
+                <li>Host information (username, character)</li>
+                <li>Room password and inclusion settings</li>
+                <li>Player list with usernames and characters</li>
+                <li>Interface, video, and audio settings</li>
+            </ul>
+        </div>
+        
+        <div class="method-doc">
+            <h4>Load Room</h4>
+            <p>Opens a dialog to load a previously saved room configuration. Shows a list of all available room configurations in the current directory.</p>
+            <p>In the room management dialog, you can:</p>
+            <ul>
+                <li><strong>Load</strong>: Load the selected room configuration</li>
+                <li><strong>Delete</strong>: Permanently remove the selected room configuration</li>
+                <li><strong>Cancel</strong>: Close the dialog without making changes</li>
+            </ul>
+            <p>Loading a room will:</p>
+            <ul>
+                <li>Restore all saved settings</li>
+                <li>Update the UI with loaded values</li>
+                <li>Automatically regenerate links</li>
+            </ul>
+        </div>
+        
+        <div class="method-doc">
+            <h4>Settings</h4>
+            <p>Opens the settings dialog with three tabs:</p>
+            <ul>
+                <li><strong>Interface</strong>
+                    <ul>
+                        <li>Show Labels: Display participant names in video feeds</li>
+                        <li>Clean Output: Hide UI elements for cleaner view</li>
+                    </ul>
+                </li>
+                <li><strong>Video</strong>
+                    <ul>
+                        <li>Resolution: Select video quality (720p to 4K)</li>
+                        <li>Bitrate: Set custom video bitrate</li>
+                        <li>FPS: Choose frame rate (24, 30, or 60)</li>
+                    </ul>
+                </li>
+                <li><strong>Audio</strong>
+                    <ul>
+                        <li>Bitrate: Set custom audio bitrate</li>
+                        <li>Stereo: Enable stereo audio output</li>
+                        <li>Noise Suppression: Reduce background noise</li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+        
+        <div class="method-doc">
+            <h4>Documentation</h4>
+            <p>Opens this documentation file in your default web browser.</p>
+        </div>
+    </div>
+
+    <h2>OBS Integration</h2>
+    <p>The application provides two ways to update OBS sources:</p>
+    <ol>
+        <li>Install the OBS WebSocket plugin:
+            <ul>
+                <li>Visit the <a href="https://github.com/obsproject/obs-websocket/releases" target="_blank">OBS WebSocket releases page</a></li>
+                <li>Download and install the latest version for your system</li>
+                <li>In OBS, go to Tools > WebSocket Server Settings</li>
+                <li>Enable the WebSocket server</li>
+                <li>Set a password if desired (recommended)</li>
+            </ul>
+        </li>
+    </ol>
+
+    <h2>Source Naming Convention</h2>
+    <p>The application uses a consistent naming convention for OBS sources:</p>
+    <ul>
+        <li><code>p0vdosolo</code>: Host's video source</li>
+        <li><code>p0name</code>: Host's name display</li>
+        <li><code>p1vdosolo</code>, <code>p2vdosolo</code>, etc.: Player video sources</li>
+        <li><code>p1name</code>, <code>p2name</code>, etc.: Player name displays</li>
+    </ul>
+
+    <h2>Debug Features</h2>
+    <div class="class-doc">
+        <h3>Debug Information</h3>
+        <p>The application includes comprehensive debug logging:</p>
+        <ul>
+            <li>OBS connection status and details</li>
+            <li>Source creation and updates</li>
+            <li>Room configuration changes</li>
+            <li>Error tracking with stack traces</li>
+        </ul>
+        
+        <div class="method-doc">
+            <h4>Debug Controls</h4>
+            <ul>
+                <li><strong>Copy Debug Info</strong>: Copies all debug information to clipboard</li>
+                <li><strong>Clear Debug Log</strong>: Clears the debug log display</li>
+            </ul>
+        </div>
+        
+        <div class="method-doc">
+            <h4>Debug Log Format</h4>
+            <p>Debug entries include:</p>
+            <ul>
+                <li>Timestamp</li>
+                <li>Event type (INFO, DEBUG, ERROR)</li>
+                <li>Detailed message</li>
+                <li>Stack trace for errors</li>
+            </ul>
+        </div>
+    </div>
+
+    <h2>GitHub Repository</h2>
+    <p>The project is maintained on GitHub. To contribute:</p>
+    <ol>
+        <li>Fork the repository</li>
+        <li>Create a feature branch</li>
+        <li>Make your changes</li>
+        <li>Submit a pull request</li>
+    </ol>
+
+    <h2>License</h2>
+    <p>This project is licensed under the MIT License. See the LICENSE file for details.</p>
+
+    <h2>Usage Examples</h2>
+
+    <h3>Basic Room Setup</h3>
+    <pre>
+1. Enter host information:
+   - Username
+   - Character name (optional)
+   - Room password
+
+2. Enter player information:
+   username1,character1
+   username2,character2
+
+3. Click "Generate Links" to create:
+   - Host link (with director mode)
+   - Player links
+   - OBS source links
+    </pre>
+
+    <h3>Settings Configuration</h3>
+    <pre>
+1. Click "Settings" to configure:
+   - Interface options (labels, clean output)
+   - Video quality settings
+   - Audio settings
+
+2. Settings are saved automatically and
+   applied to new link generation
+    </pre>
+
+    <h3>Room Management</h3>
+    <pre>
+1. Save rooms with "Save Room"
+2. Load previous rooms with "Load Room"
+3. Rooms include:
+   - All participant information
+   - Password settings
+   - Display preferences
+    </pre>
+
+    <h2>Best Practices</h2>
+    <ul>
+        <li>Always use unique usernames for participants</li>
+        <li>Set meaningful character names for easy identification</li>
+        <li>Use strong room passwords</li>
+        <li>Test links before sharing with participants</li>
+        <li>Save room configurations for frequent setups</li>
+    </ul>
+
+</body>
+</html>

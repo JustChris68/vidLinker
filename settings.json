@@ -1,0 +1,37 @@
+{
+    "interface": {
+        "show_labels": true,
+        "clean_output": false,
+        "debug_mode": true,
+        "enable_obs": true
+    },
+    "video": {
+        "resolution": "1080p",
+        "bitrate": "2500",
+        "fps": "30"
+    },
+    "audio": {
+        "bitrate": "128",
+        "stereo": true,
+        "noise_suppression": true
+    },
+    "obs": {
+        "host": "localhost",
+        "port": 4455,
+        "password": "Truff1es"
+    },
+    "room": {
+        "room_name": "Example Room",
+        "host_username": "Host",
+        "host_character": "GameMaster",
+        "room_password": "1234",
+        "password_inclusion": "include",
+        "player_info": "playerme,char1\nplayeryou,char2\nsteve,evil cleric\nangie,chaos druid",
+        "players": {
+            "playerme": "char1",
+            "playeryou": "char2",
+            "steve": "evil cleric",
+            "angie": "chaos druid"
+        }
+    }
+}
