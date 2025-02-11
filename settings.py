@@ -1,5 +1,6 @@
 from dataclasses import dataclass, asdict, field
 import json
+import os
 from typing import Optional, Dict
 
 @dataclass
@@ -14,14 +15,14 @@ class InterfaceSettings:
 class VideoSettings:
     """Video settings"""
     resolution: str = "1080p"
-    bitrate: str = "2500"
-    fps: str = "30"
+    bitrate: str = ""
+    fps: str = ""
 
 @dataclass
 class AudioSettings:
     """Audio settings"""
-    bitrate: str = "128"
-    stereo: bool = True
+    bitrate: str = ""
+    stereo: bool = False
     noise_suppression: bool = True
 
 @dataclass
@@ -126,58 +127,75 @@ class RoomSettings:
         }
         return "https://vdo.ninja/?" + "&".join(f"{k}={v}" for k, v in params.items())
 
-@dataclass
 class Settings:
     """Application settings"""
-    interface: InterfaceSettings = field(default_factory=InterfaceSettings)
-    video: VideoSettings = field(default_factory=VideoSettings)
-    audio: AudioSettings = field(default_factory=AudioSettings)
-    obs: OBSSettings = field(default_factory=OBSSettings)
-    room: RoomSettings = field(default_factory=RoomSettings)
+    def __init__(self):
+        self.interface = InterfaceSettings()
+        self.video = VideoSettings()
+        self.audio = AudioSettings()
+        self.obs = OBSSettings()
+        self.room = RoomSettings()
     
-    def save(self, filename: str = "settings.json") -> None:
-        """Save settings to file"""
-        data = {
-            "interface": asdict(self.interface),
-            "video": asdict(self.video),
-            "audio": asdict(self.audio),
-            "obs": asdict(self.obs),
-            "room": self.room.to_dict()
-        }
-        with open(filename, "w") as f:
-            json.dump(data, f, indent=4)
+    def save(self, file_path: str = None):
+        """Save settings to a file"""
+        if file_path is None:
+            file_path = 'settings.json'
+            
+        try:
+            settings_data = {
+                'interface': asdict(self.interface),
+                'video': asdict(self.video),
+                'audio': asdict(self.audio),
+                'obs': asdict(self.obs),
+                'room': asdict(self.room)
+            }
+            with open(file_path, 'w') as f:
+                json.dump(settings_data, f, indent=4)
+        except Exception as e:
+            raise Exception(f"Failed to save settings: {str(e)}")
     
-    def load(self, filename: str = "settings.json") -> None:
+    def save_room(self, file_path: str):
+        """Save room configuration to a specific file"""
+        try:
+            room_data = asdict(self.room)
+            with open(file_path, 'w') as f:
+                json.dump(room_data, f, indent=4)
+        except Exception as e:
+            raise Exception(f"Failed to save room configuration: {str(e)}")
+    
+    def load(self):
         """Load settings from file"""
         try:
-            with open(filename, "r") as f:
-                data = json.load(f)
-                
-            # Update interface settings
-            if "interface" in data:
-                self.interface = InterfaceSettings(**data["interface"])
-            if "video" in data:
-                self.video = VideoSettings(**data["video"])
-            if "audio" in data:
-                self.audio = AudioSettings(**data["audio"])
-            if "obs" in data:
-                self.obs = OBSSettings(**data["obs"])
-            if "room" in data:
-                self.room.from_dict(data["room"])
-        except FileNotFoundError:
-            # Use defaults if file doesn't exist
-            pass
-    
-    def save_room(self, filename: Optional[str] = None) -> None:
-        """Save room configuration"""
-        if filename is None:
-            filename = f"{self.room.room_name}_room.json"
-        
-        with open(filename, "w") as f:
-            json.dump(self.room.to_dict(), f, indent=4)
-    
-    def load_room(self, filename: str) -> None:
-        """Load room configuration"""
-        with open(filename, "r") as f:
-            data = json.load(f)
-            self.room.from_dict(data)
+            settings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'settings.json')
+            if os.path.exists(settings_path):
+                with open(settings_path, 'r') as f:
+                    data = json.load(f)
+                    
+                    # Load interface settings
+                    if 'interface' in data:
+                        for k, v in data['interface'].items():
+                            setattr(self.interface, k, v)
+                    
+                    # Load video settings
+                    if 'video' in data:
+                        for k, v in data['video'].items():
+                            setattr(self.video, k, v)
+                    
+                    # Load audio settings
+                    if 'audio' in data:
+                        for k, v in data['audio'].items():
+                            setattr(self.audio, k, v)
+                    
+                    # Load OBS settings
+                    if 'obs' in data:
+                        for k, v in data['obs'].items():
+                            setattr(self.obs, k, v)
+                    
+                    # Load room settings
+                    if 'room' in data:
+                        for k, v in data['room'].items():
+                            setattr(self.room, k, v)
+        except Exception as e:
+            print(f"Failed to load settings: {str(e)}")
+            # Use defaults if loading fails
+            self.__init__()

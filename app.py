@@ -1,13 +1,16 @@
 import os
+import json
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from datetime import datetime
-import re
-
+import webbrowser
+import traceback
+from typing import Optional, Dict, List
 from settings import Settings
 from obs_manager import OBSManager
 from vdo_ninja_manager import VDONinjaManager
 from ui_components import SettingsDialog, ScrollableFrame
+import datetime
+import logging
 
 class PlayerFrame(ttk.Frame):
     def __init__(self, parent, player_num, initial_name="", initial_char="", **kwargs):
@@ -42,7 +45,6 @@ class PlayerFrame(ttk.Frame):
         
         # Callback for deletion
         self.on_delete_callback = None
-        self.on_change_callback = None
     
     def get_player_info(self):
         return {
@@ -53,349 +55,476 @@ class PlayerFrame(ttk.Frame):
     def set_delete_callback(self, callback):
         self.on_delete_callback = callback
     
-    def set_change_callback(self, callback):
-        self.on_change_callback = callback
-    
     def on_delete(self):
         if self.on_delete_callback:
             self.on_delete_callback(self)
-    
-    def on_change(self):
-        if self.on_change_callback:
-            self.on_change_callback()
 
-class RoomConfigFrame(ttk.Frame):
-    def __init__(self, parent, **kwargs):
-        super().__init__(parent, **kwargs)
+class RoomConfigFrame(ttk.LabelFrame):
+    """Frame for room configuration"""
+    def __init__(self, parent, app):
+        super().__init__(parent, text="Room Configuration")
+        self.app = app
         
-        # Room name frame
-        room_frame = ttk.Frame(self)
-        room_frame.pack(fill="x", padx=5, pady=5)
-        ttk.Label(room_frame, text="Room Name:").pack(side="left", padx=(0,5))
-        self.room_var = tk.StringVar()
-        ttk.Entry(room_frame, textvariable=self.room_var).pack(side="left", fill="x", expand=True)
+        # Room name
+        name_frame = ttk.Frame(self)
+        name_frame.pack(fill="x", padx=5, pady=2)
+        ttk.Label(name_frame, text="Room Name:").pack(side="left", padx=2)
+        self.room_name = ttk.Entry(name_frame)
+        self.room_name.pack(side="left", expand=True, fill="x", padx=2)
         
-        # Password frame
+        # Room password
         pass_frame = ttk.Frame(self)
-        pass_frame.pack(fill="x", padx=5, pady=5)
-        ttk.Label(pass_frame, text="Password:").pack(side="left", padx=(0,5))
-        self.pass_var = tk.StringVar()
-        ttk.Entry(pass_frame, textvariable=self.pass_var).pack(side="left", fill="x", expand=True)
+        pass_frame.pack(fill="x", padx=5, pady=2)
+        ttk.Label(pass_frame, text="Password:").pack(side="left", padx=2)
+        self.room_password = ttk.Entry(pass_frame)
+        self.room_password.pack(side="left", expand=True, fill="x", padx=2)
         
-        # Host frame
-        host_frame = ttk.LabelFrame(self, text="Host Settings")
-        host_frame.pack(fill="x", padx=5, pady=5)
+        # Password inclusion checkbox
+        self.include_password = tk.BooleanVar(value=False)
+        self.password_checkbox = ttk.Checkbutton(pass_frame, text="Include in links", 
+                                               variable=self.include_password,
+                                               command=self.on_password_change)
+        self.password_checkbox.pack(side="right", padx=5)
         
-        # Host name
-        host_name_frame = ttk.Frame(host_frame)
-        host_name_frame.pack(fill="x", padx=5, pady=2)
-        ttk.Label(host_name_frame, text="Host Name:").pack(side="left", padx=(0,5))
-        self.host_name_var = tk.StringVar()
-        ttk.Entry(host_name_frame, textvariable=self.host_name_var).pack(side="left", fill="x", expand=True)
+        # Room control buttons
+        btn_frame = ttk.Frame(self)
+        btn_frame.pack(fill="x", padx=5, pady=2)
         
-        # Host character
-        host_char_frame = ttk.Frame(host_frame)
-        host_char_frame.pack(fill="x", padx=5, pady=2)
-        ttk.Label(host_char_frame, text="Host Character:").pack(side="left", padx=(0,5))
-        self.host_char_var = tk.StringVar()
-        ttk.Entry(host_char_frame, textvariable=self.host_char_var).pack(side="left", fill="x", expand=True)
+        # Left side buttons
+        left_buttons = ttk.Frame(btn_frame)
+        left_buttons.pack(side="left", fill="x")
         
-        # Players frame
-        players_label_frame = ttk.Frame(self)
-        players_label_frame.pack(fill="x", padx=5, pady=(10,0))
-        ttk.Label(players_label_frame, text="Players:").pack(side="left")
-        ttk.Button(players_label_frame, text="Add Player", command=self.add_player).pack(side="right")
+        ttk.Button(left_buttons, text="New Room", 
+                  command=self.new_room).pack(side="left", padx=5)
+        ttk.Button(left_buttons, text="Save Room",
+                  command=self.app.save_room).pack(side="left", padx=5)
+        ttk.Button(left_buttons, text="Load Room",
+                  command=self.app.load_room_dialog).pack(side="left", padx=5)
+        ttk.Button(left_buttons, text="Documentation",
+                  command=self.app.show_documentation).pack(side="left", padx=5)
+        ttk.Button(left_buttons, text="Settings",
+                  command=self.app.show_settings).pack(side="left", padx=5)
         
-        # Scrollable frame for players
-        self.canvas = tk.Canvas(self)
-        scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = ttk.Frame(self.canvas)
-        
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
-        
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw", width=self.winfo_width())
-        self.canvas.configure(yscrollcommand=scrollbar.set)
-        
-        self.canvas.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-        scrollbar.pack(side="right", fill="y", pady=5)
-        
-        # List to keep track of player frames
-        self.player_frames = []
-        
-        # Add initial player
-        self.add_player()
-        
-        # Bind resize event
-        self.bind("<Configure>", self.on_resize)
-        
-        # Bind variable trace for auto-update
-        self.room_var.trace_add("write", self.on_config_change)
-        self.pass_var.trace_add("write", self.on_config_change)
-        self.host_name_var.trace_add("write", self.on_config_change)
-        self.host_char_var.trace_add("write", self.on_config_change)
+        # Bind events
+        self.room_name.bind('<KeyRelease>', self.on_field_change)
+        self.room_password.bind('<KeyRelease>', self.on_password_change)
     
-    def on_config_change(self, *args):
-        """Called when any configuration value changes"""
-        # Get the root window
-        root = self.winfo_toplevel()
-        if hasattr(root, "generate_links"):
-            root.generate_links()
-    
-    def on_resize(self, event):
-        # Update canvas window width when frame is resized
-        if event.widget == self:
-            self.canvas.itemconfig(1, width=event.width-30)  # Subtract scrollbar width and padding
-    
-    def add_player(self):
-        player_num = len(self.player_frames) + 1
-        player_frame = PlayerFrame(self.scrollable_frame, player_num)
-        player_frame.pack(fill="x", padx=5, pady=2)
-        player_frame.set_delete_callback(self.remove_player)
-        player_frame.set_change_callback(self.on_config_change)
-        self.player_frames.append(player_frame)
-        
-        # Update player numbers
-        self.renumber_players()
-    
-    def remove_player(self, player_frame):
-        if len(self.player_frames) > 1:  # Keep at least one player
-            player_frame.pack_forget()
-            player_frame.destroy()
-            self.player_frames.remove(player_frame)
-            # Update player numbers
-            self.renumber_players()
-    
-    def renumber_players(self):
-        for i, frame in enumerate(self.player_frames, 1):
-            frame.player_num = i
-            # Update the label in the first child frame (info_frame)
-            for child in frame.winfo_children():
-                if isinstance(child, ttk.Frame):
-                    for label in child.winfo_children():
-                        if isinstance(label, ttk.Label) and label.cget("text").startswith("Player"):
-                            label.configure(text=f"Player {i}:")
-                            break
-                    break
-    
-    def get_config(self):
-        config = {
-            "room": self.room_var.get(),
-            "password": self.pass_var.get(),
-            "host_username": self.host_name_var.get(),
-            "host_character": self.host_char_var.get(),
-            "players": {}
-        }
-        
-        for frame in self.player_frames:
-            player_info = frame.get_player_info()
-            if player_info["name"]:  # Only include players with names
-                config["players"][player_info["name"]] = player_info["character"]
-        
-        return config
-    
-    def set_config(self, config):
-        self.room_var.set(config.get("room", ""))
-        self.pass_var.set(config.get("password", ""))
-        self.host_name_var.set(config.get("host_username", ""))
-        self.host_char_var.set(config.get("host_character", ""))
+    def new_room(self):
+        """Create a new room"""
+        self.room_name.delete(0, "end")
+        self.room_password.delete(0, "end")
         
         # Clear existing players
-        for frame in self.player_frames:
-            frame.pack_forget()
-            frame.destroy()
-        self.player_frames.clear()
+        if hasattr(self.app, 'player_entries'):
+            for entry in self.app.player_entries:
+                entry['frame'].destroy()
+            self.app.player_entries.clear()
         
-        # Add players from config
-        players = config.get("players", {})
-        if not players:
-            self.add_player()  # Add one empty player if none in config
-        else:
-            for name, character in players.items():
-                player_frame = PlayerFrame(self.scrollable_frame, len(self.player_frames) + 1, name, character)
-                player_frame.pack(fill="x", padx=5, pady=2)
-                player_frame.set_delete_callback(self.remove_player)
-                player_frame.set_change_callback(self.on_config_change)
-                self.player_frames.append(player_frame)
+        # Trigger link generation
+        self.app.generate_links()
+    
+    def on_field_change(self, event=None):
+        """Handle field changes"""
+        if hasattr(self.app, 'generate_links'):
+            self.app.generate_links()
+    
+    def on_password_change(self, event=None):
+        """Handle password field changes"""
+        # Update checkbox state based on password field
+        if not self.room_password.get().strip():
+            self.include_password.set(False)
+        
+        # Trigger link update
+        if hasattr(self.app, 'generate_links'):
+            self.app.generate_links()
+    
+    def get_room_name(self):
+        """Get current room name"""
+        return self.room_name.get().strip()
+    
+    def get_room_password(self):
+        """Get current room password if inclusion is enabled"""
+        if self.include_password.get() and self.room_password.get().strip():
+            return self.room_password.get().strip()
+        return ""
+    
+    def set_room_name(self, name):
+        """Set room name"""
+        self.room_name.delete(0, "end")
+        self.room_name.insert(0, name or "")
+    
+    def set_room_password(self, password):
+        """Set room password"""
+        self.room_password.delete(0, "end")
+        self.room_password.insert(0, password or "")
 
 class App:
     def __init__(self):
         """Initialize the application"""
-        self.settings = Settings()
-        self.settings.load()
-        
         self.root = tk.Tk()
         self.root.title("VDO.Ninja Link Manager")
         
-        # Create main frame
-        self.main_frame = ttk.Frame(self.root)
-        self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # Create main frame with padding
+        self.main_frame = ttk.Frame(self.root, padding="10 10 10 10")
+        self.main_frame.pack(fill="both", expand=True)
         
-        # Room configuration frame
-        self.room_config = RoomConfigFrame(self.main_frame)
-        self.room_config.pack(fill="both", expand=True)
+        # Initialize logging
+        self.debug_log_path = "obs_debug.log"
+        logging.basicConfig(
+            filename=self.debug_log_path,
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        self.logger = logging.getLogger(__name__)
         
-        # Button frame
-        button_frame = ttk.Frame(self.main_frame)
-        button_frame.pack(fill="x", pady=10)
+        # Load settings
+        self.settings = Settings()
+        self.settings.load()
         
-        # Buttons
-        ttk.Button(
-            button_frame,
-            text="Save Room",
-            command=self.save_room
-        ).pack(side="left", padx=5)
+        # Create UI components
+        self.create_room_config_frame()
+        self.create_player_list_frame()
+        self.create_debug_frame()
         
-        ttk.Button(
-            button_frame,
-            text="Load Room",
-            command=self.load_room_dialog
-        ).pack(side="left", padx=5)
+        # Update window size to fit content
+        self.root.update_idletasks()
+        width = self.root.winfo_reqwidth()
+        height = self.root.winfo_reqheight()
         
-        ttk.Button(
-            button_frame,
-            text="Settings",
-            command=self.show_settings
-        ).pack(side="left", padx=5)
+        # Add 10% padding
+        width = int(width * 1.1)
+        height = int(height * 1.1)
         
-        if self.settings.interface.enable_obs:
-            self.obs_button = ttk.Button(button_frame, text="Update OBS", command=self.update_obs_sources)
-            self.obs_button.pack(side="left", padx=5)
+        # Center window
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
         
-        # Documentation button
-        ttk.Button(
-            button_frame,
-            text="Documentation",
-            command=self.show_documentation
-        ).pack(side="left", padx=5)
+        # Set window size and position
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
         
-        # Links frame
-        self.links_frame = ttk.LabelFrame(self.main_frame, text="Generated Links")
-        self.links_frame.pack(fill="both", expand=True, pady=10)
-        
-        # Debug frame
-        self.debug_frame = ttk.LabelFrame(self.main_frame, text="Debug Info")
-        self.debug_frame.pack(fill="both", expand=True, pady=10)
-        
-        # Debug buttons
-        buttons_frame = ttk.Frame(self.debug_frame)
-        buttons_frame.pack(fill="x", padx=5, pady=5)
-        
-        ttk.Button(buttons_frame, text="Copy Debug Info", command=self.copy_debug_info).pack(side="left", padx=2)
-        ttk.Button(buttons_frame, text="Clear Debug Log", command=self.clear_debug_log).pack(side="left", padx=2)
-        
-        # Debug text
-        self.debug_text = tk.Text(self.debug_frame, height=10)
-        self.debug_text.pack(fill="both", expand=True, padx=5, pady=5)
-        
-        # Initial debug info
-        self.update_debug_info()
-        
-        # Initialize managers
+        # Initialize OBS manager
         self.obs_manager = OBSManager()
-        self.vdo_manager = VDONinjaManager()
+        if self.settings.interface.enable_obs:
+            self.connect_to_obs()
         
-        # Try to connect to OBS
-        self.connect_to_obs()
+        # Initialize VDO.Ninja manager
+        self.vdo_ninja = VDONinjaManager()
         
         # Load initial room config if exists
         if self.settings.room and self.settings.room.room_name:
-            self.room_config.set_config({
-                "room": self.settings.room.room_name,
-                "password": self.settings.room.room_password,
-                "players": self.settings.room.players
-            })
+            self.room_config.set_room_name(self.settings.room.room_name)
+            self.room_config.set_room_password(self.settings.room.room_password)
             self.generate_links()
             
-    def show_documentation(self):
-        """Show documentation in a new window"""
-        doc_window = tk.Toplevel(self.root)
-        doc_window.title("VDO.Ninja Link Manager Documentation")
-        doc_window.geometry("600x400")
+    def create_room_config_frame(self):
+        """Create the room configuration frame"""
+        # Create frame
+        self.room_config = RoomConfigFrame(self.main_frame, self)
+        self.room_config.pack(fill="x", padx=5, pady=5)
         
-        doc_text = tk.Text(doc_window, wrap="word", padx=10, pady=10)
-        doc_text.pack(fill="both", expand=True)
+    def create_player_list_frame(self):
+        """Create the player list frame"""
+        # Create frame
+        self.player_list_frame = ttk.LabelFrame(self.main_frame, text="Players")
+        self.player_list_frame.pack(fill="x", padx=5, pady=5)
         
-        # Add scrollbar
-        scrollbar = ttk.Scrollbar(doc_window, orient="vertical", command=doc_text.yview)
+        # Create control buttons frame at top
+        control_frame = ttk.Frame(self.player_list_frame)
+        control_frame.pack(fill="x", padx=5, pady=2)
+        
+        # Left side buttons
+        left_buttons = ttk.Frame(control_frame)
+        left_buttons.pack(side="left", fill="x")
+        
+        ttk.Button(
+            left_buttons,
+            text="Add Player",
+            command=self.add_player
+        ).pack(side="left", padx=5)
+        
+        # Right side buttons
+        right_buttons = ttk.Frame(control_frame)
+        right_buttons.pack(side="right", fill="x")
+        
+        ttk.Button(
+            right_buttons,
+            text="Update OBS",
+            command=self.update_obs_sources_manual
+        ).pack(side="right", padx=5)
+        
+        # Create main players frame
+        players_frame = ttk.Frame(self.player_list_frame)
+        players_frame.pack(fill="x", expand=True)
+        
+        # Track player entries
+        self.player_entries = []
+        
+        # Create scrolled frame for players
+        self.players_canvas = tk.Canvas(players_frame)
+        scrollbar = ttk.Scrollbar(players_frame, orient="vertical", command=self.players_canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.players_canvas)
+        
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.players_canvas.configure(scrollregion=self.players_canvas.bbox("all"))
+        )
+        
+        self.players_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.players_canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack canvas and scrollbar
+        self.players_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        doc_text.configure(yscrollcommand=scrollbar.set)
         
-        documentation = """
-VDO.Ninja Link Manager Documentation
-
-Overview:
----------
-The VDO.Ninja Link Manager helps you create and manage permanent links for VDO.Ninja rooms.
-It integrates with OBS to automatically update sources when links change.
-
-Features:
----------
-1. Room Management
-   - Create and save room configurations
-   - Set room name and password
-   - Add/remove players
-   - Set player names and character names
-
-2. Link Generation
-   - Generates host/director link with OBS control
-   - Generates individual player links
-   - All links use meshcast for improved performance
-   - Default 1080p resolution
-
-3. OBS Integration
-   - Automatically creates/updates browser sources
-   - Organizes sources in a dedicated "VDO Assets" scene
-   - Updates names based on player/character names
-
-Usage:
-------
-1. Room Configuration
-   - Enter room name and password
-   - Add players using the "Add Player" button
-   - Set player names and character names
-   - Delete players using the "Delete" button
-
-2. Managing Links
-   - Links are automatically generated when you save
-   - Use "Copy" buttons to copy links to clipboard
-   - Links include all necessary parameters
-
-3. OBS Integration
-   - Enable OBS in settings
-   - Set host, port, and password
-   - Use "Update OBS" to refresh sources
-
-Tips:
------
-- Always save your room configuration
-- Test links before sharing with players
-- Check debug log for troubleshooting
-"""
+        # Create bottom buttons frame
+        bottom_frame = ttk.Frame(self.player_list_frame)
+        bottom_frame.pack(fill="x", padx=5, pady=2)
         
-        doc_text.insert("1.0", documentation)
-        doc_text.configure(state="disabled")
+        ttk.Button(
+            bottom_frame,
+            text="Copy HTML Links",
+            command=lambda: self.copy_all_links(html=True)
+        ).pack(side="left", padx=5)
         
-    def copy_debug_info(self):
-        """Copy debug info to clipboard"""
-        debug_info = self.get_debug_info()
-        self.root.clipboard_clear()
-        self.root.clipboard_append(debug_info)
-        messagebox.showinfo("Success", "Debug info copied to clipboard!")
+        ttk.Button(
+            bottom_frame,
+            text="Copy Plain Links",
+            command=lambda: self.copy_all_links(html=False)
+        ).pack(side="left", padx=5)
+        
+        # Add host entry first
+        self.add_host_entry()
+        
+    def add_host_entry(self):
+        """Add the host entry at the top of the player list"""
+        # Create frame for host
+        host_frame = ttk.Frame(self.scrollable_frame)
+        host_frame.pack(fill="x", padx=5, pady=2)
+        
+        # Host label
+        ttk.Label(host_frame, text="Host:", width=8).pack(side="left", padx=2)
+        
+        # Name entry
+        ttk.Label(host_frame, text="Name:", width=6).pack(side="left", padx=2)
+        name_entry = ttk.Entry(host_frame, width=20)
+        name_entry.pack(side="left", padx=2)
+        
+        # Character entry
+        ttk.Label(host_frame, text="Character:", width=10).pack(side="left", padx=2)
+        char_entry = ttk.Entry(host_frame, width=20)
+        char_entry.pack(side="left", padx=2)
+        
+        # Spacer to align with player entries
+        ttk.Frame(host_frame).pack(side="left", padx=44)
+        
+        # Buttons frame
+        btn_frame = ttk.Frame(host_frame)
+        btn_frame.pack(side="right", padx=2)
+        
+        # Copy link buttons
+        copy_html_btn = ttk.Button(btn_frame, text="Copy HTML",
+                                command=lambda: self.copy_host_link(as_html=True))
+        copy_html_btn.pack(side="left", padx=2)
+        
+        copy_text_btn = ttk.Button(btn_frame, text="Copy Link",
+                                command=lambda: self.copy_host_link(as_html=False))
+        copy_text_btn.pack(side="left", padx=2)
+        
+        # Store references
+        self.host_entry = {
+            'frame': host_frame,
+            'name': name_entry,
+            'character': char_entry
+        }
+        
+        # Bind events
+        name_entry.bind('<KeyRelease>', lambda e: self.generate_links())
+        char_entry.bind('<KeyRelease>', lambda e: self.generate_links())
+        
+        # Load host info if available
+        if hasattr(self.settings, 'room'):
+            name_entry.insert(0, self.settings.room.host_username)
+            char_entry.insert(0, self.settings.room.host_character)
     
-    def clear_debug_log(self):
-        """Clear the debug log"""
+    def add_player(self):
+        """Add a player to the list"""
+        # Create frame for this player
+        player_frame = ttk.Frame(self.scrollable_frame)
+        player_frame.pack(fill="x", padx=5, pady=2)
+        
+        # Player number
+        player_num = len(self.player_entries) + 1
+        ttk.Label(player_frame, text=f"Player {player_num}:", width=8).pack(side="left", padx=2)
+        
+        # Name entry
+        ttk.Label(player_frame, text="Name:", width=6).pack(side="left", padx=2)
+        name_entry = ttk.Entry(player_frame, width=20)
+        name_entry.pack(side="left", padx=2)
+        
+        # Character entry
+        ttk.Label(player_frame, text="Character:", width=10).pack(side="left", padx=2)
+        char_entry = ttk.Entry(player_frame, width=20)
+        char_entry.pack(side="left", padx=2)
+        
+        # Buttons frame
+        btn_frame = ttk.Frame(player_frame)
+        btn_frame.pack(side="right", padx=2)
+        
+        # Delete button
+        delete_btn = ttk.Button(btn_frame, text="Delete",
+                              command=lambda f=player_frame, n=name_entry, c=char_entry:
+                              self.delete_player_entry(f, n, c))
+        delete_btn.pack(side="left", padx=2)
+        
+        # Store references
+        self.player_entries.append({
+            'frame': player_frame,
+            'name': name_entry,
+            'character': char_entry
+        })
+        
+        # Bind events
+        name_entry.bind('<KeyRelease>', lambda e: self.generate_links())
+        char_entry.bind('<KeyRelease>', lambda e: self.generate_links())
+        
+        # Update links
+        self.generate_links()
+
+    def delete_player_entry(self, frame, name_entry, char_entry):
+        """Delete a player entry"""
+        # Remove from player entries
+        self.player_entries = [p for p in self.player_entries 
+                             if p['frame'] != frame]
+        
+        # Destroy the frame
+        frame.destroy()
+        
+        # Renumber remaining players
+        for i, entry in enumerate(self.player_entries, 1):
+            label = entry['frame'].winfo_children()[0]
+            label.configure(text=f"Player {i}:")
+        
+        # Update links
+        self.generate_links()
+
+    def generate_links(self):
+        """Generate all links"""
         try:
-            with open(self.debug_log_path, 'w') as f:
-                f.write("")
-            self.log_debug("Debug log cleared")
-            self.update_debug_info()
-            messagebox.showinfo("Success", "Debug log cleared!")
+            links = {}
+            
+            # Get room name and password
+            room_name = self.room_config.get_room_name()
+            if not room_name:
+                raise ValueError("Room name is not set")
+            
+            password = self.room_config.get_room_password()
+            
+            # Update settings with current values
+            self.settings.room.room_name = room_name
+            self.settings.room.room_password = self.room_config.get_room_password()
+            
+            # Save host info
+            if hasattr(self, 'host_entry'):
+                self.settings.room.host_username = self.host_entry['name'].get().strip()
+                self.settings.room.host_character = self.host_entry['character'].get().strip()
+            
+            # Generate host/director params
+            params = {
+                "room": room_name,
+                "director": "1",
+                "quality": "1080p",
+                "meshcast": "1"
+            }
+            
+            # Only add password if it exists
+            if password:
+                params["password"] = password
+            
+            # Add host name if provided
+            if self.settings.room.host_username:
+                params["username"] = self.settings.room.host_username
+            
+            # Add host character if provided
+            if self.settings.room.host_character:
+                params["character"] = self.settings.room.host_character
+            
+            links['host'] = "https://vdo.ninja/?" + "&".join(f"{k}={v}" for k, v in params.items())
+            
+            # Generate player links
+            for entry in self.player_entries:
+                username = entry['name'].get().strip()
+                character = entry['character'].get().strip()
+                
+                if username:  # Only generate link if username is provided
+                    player_params = {
+                        "room": room_name,
+                        "username": username,
+                        "quality": "1080p",
+                        "meshcast": "1"
+                    }
+                    
+                    # Only add password if it exists
+                    if password:
+                        player_params["password"] = password
+                    
+                    # Add character if provided
+                    if character:
+                        player_params["character"] = character
+                    
+                    player_url = "https://vdo.ninja/?" + "&".join(f"{k}={v}" for k, v in player_params.items())
+                    links[username] = player_url
+            
+            # Update OBS sources if connected
+            self.update_obs_sources(links)
+            
+            return links
+            
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to clear debug log: {str(e)}")
-    
+            self.logger.error(f"Failed to generate links: {str(e)}")
+            messagebox.showerror("Error", f"Failed to generate links: {str(e)}")
+
+    def create_debug_frame(self):
+        """Create the debug frame"""
+        # Create frame
+        debug_frame = ttk.LabelFrame(self.main_frame, text="Debug Log")
+        debug_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Create text widget with scrollbar
+        self.debug_text = tk.Text(debug_frame, height=8)
+        scrollbar = ttk.Scrollbar(debug_frame, orient="vertical", command=self.debug_text.yview)
+        self.debug_text.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack widgets
+        self.debug_text.pack(side="left", fill="both", expand=True, padx=(5,0), pady=5)
+        scrollbar.pack(side="right", fill="y", padx=(0,5), pady=5)
+        
+        # Create button frame
+        button_frame = ttk.Frame(debug_frame)
+        button_frame.pack(fill="x", padx=5, pady=(0,5))
+        
+        # Add buttons
+        ttk.Button(
+            button_frame,
+            text="Copy Debug Info",
+            command=self.copy_debug_info
+        ).pack(side="left", padx=5)
+        
+        ttk.Button(
+            button_frame,
+            text="Clear Log",
+            command=self.clear_debug_log
+        ).pack(side="left", padx=5)
+
+    def show_documentation(self):
+        """Show documentation in web browser"""
+        try:
+            doc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "documentation.html")
+            webbrowser.open(doc_path)
+        except Exception as e:
+            self.logger.error(f"Failed to open documentation: {str(e)}")
+            messagebox.showerror("Error", f"Failed to open documentation: {str(e)}")
+
     def show_settings(self):
         """Show the settings dialog"""
         dialog = SettingsDialog(self.root, self.settings)
@@ -410,122 +539,129 @@ Tips:
         dialog.on_save = on_save
         
     def save_room(self):
-        """Save the current room configuration"""
-        config = self.room_config.get_config()
-        if not config["room"].strip():
-            messagebox.showerror("Error", "Room name is required")
-            return
-            
-        # Update settings with current UI values
-        self.settings.room.room_name = config["room"]
-        self.settings.room.room_password = config["password"]
-        self.settings.room.players = config["players"]
-        
-        # Update player_info for backward compatibility
-        self.settings.room.player_info = "\n".join(f"{name},{char}" for name, char in config["players"].items())
-        
-        # Let user choose where to save
-        filename = filedialog.asksaveasfilename(
-            title="Save Room Configuration",
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json")],
-            initialdir=os.path.dirname(os.path.abspath(__file__)),
-            initialfile=f"{self.settings.room.room_name}_room.json"
-        )
-        
-        if filename:
-            try:
-                self.settings.save_room(filename)
-                self.generate_links()
-                self.log_debug(f"Successfully saved room: {self.settings.room.room_name}")
-                messagebox.showinfo("Success", "Room configuration saved successfully")
-            except Exception as e:
-                self.log_debug(f"Failed to save room: {str(e)}")
-                messagebox.showerror("Error", f"Failed to save room: {str(e)}")
-                
-    def load_room_dialog(self):
-        """Show dialog to load a room configuration"""
-        filename = filedialog.askopenfilename(
-            title="Load Room Configuration",
-            filetypes=[("JSON files", "*.json")],
-            initialdir=os.path.dirname(os.path.abspath(__file__))
-        )
-        if filename:
-            try:
-                self.settings.load_room(filename)
-                
-                # Set the room configuration in the UI
-                config = {
-                    "room": self.settings.room.room_name,
-                    "password": self.settings.room.room_password,
-                    "players": {}
-                }
-                
-                # Handle both old and new formats
-                if self.settings.room.player_info:
-                    for line in self.settings.room.player_info.splitlines():
-                        if line.strip():
-                            try:
-                                username, character = map(str.strip, line.split(','))
-                                config["players"][username] = character
-                            except ValueError:
-                                continue
-                else:
-                    config["players"] = self.settings.room.players
-                
-                self.room_config.set_config(config)
-                self.generate_links()
-                self.log_debug(f"Successfully loaded room: {self.settings.room.room_name}")
-                messagebox.showinfo("Success", "Room configuration loaded successfully")
-            except Exception as e:
-                self.log_debug(f"Failed to load room: {str(e)}")
-                messagebox.showerror("Error", f"Failed to load room: {str(e)}")
-                
-    def generate_links(self):
-        """Generate VDO.Ninja links based on current configuration"""
+        """Save current room configuration"""
         try:
-            if not self.settings.room.room_name:
-                raise ValueError("Room name is not set")
-                
-            # Clear existing links
-            for widget in self.links_frame.winfo_children():
-                widget.destroy()
-                
-            # Create links frame
-            self.links_list = ttk.Treeview(self.links_frame, columns=("Link",), show="tree")
-            self.links_list.pack(fill="both", expand=True, padx=5, pady=5)
-            self.links_list.column("#0", width=150)
-            self.links_list.column("Link", width=400)
+            # Get file path
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Save Room Configuration"
+            )
             
-            # Add scrollbar
-            scrollbar = ttk.Scrollbar(self.links_frame, orient="vertical", command=self.links_list.yview)
-            scrollbar.pack(side="right", fill="y")
-            self.links_list.configure(yscrollcommand=scrollbar.set)
+            if not file_path:
+                return
             
-            # Add buttons frame
-            buttons_frame = ttk.Frame(self.links_frame)
-            buttons_frame.pack(fill="x", padx=5, pady=5)
+            # Update settings with current values
+            self.settings.room.room_name = self.room_config.get_room_name()
+            self.settings.room.room_password = self.room_config.get_room_password()
             
-            # Copy buttons
-            ttk.Button(buttons_frame, text="Copy HTML Links", command=self.copy_html_links).pack(side="left", padx=2)
-            ttk.Button(buttons_frame, text="Copy Plain Links", command=self.copy_plain_links).pack(side="left", padx=2)
-            ttk.Button(buttons_frame, text="Update OBS", command=self.update_obs_sources).pack(side="right", padx=2)
+            # Save host info
+            if hasattr(self, 'host_entry'):
+                self.settings.room.host_username = self.host_entry['name'].get().strip()
+                self.settings.room.host_character = self.host_entry['character'].get().strip()
             
-            # Host link
-            host_link = self.settings.room.get_host_link()
-            self.links_list.insert("", "end", text="Host Link", values=(host_link,))
+            self.settings.room.players.clear()
             
-            # Player links
-            for player_name in self.settings.room.players:
-                player_link = self.settings.room.get_player_link(player_name)
-                self.links_list.insert("", "end", text=f"{player_name} Link", values=(player_link,))
-                
-            # Update OBS sources
-            self.update_obs_sources()
+            # Add player data to settings
+            for entry in self.player_entries:
+                name = entry['name'].get().strip()
+                character = entry['character'].get().strip()
+                if name:  # Only add if name is provided
+                    self.settings.room.players[name] = character
+            
+            # Save using settings class method
+            self.settings.save_room(file_path)
+            messagebox.showinfo("Success", "Room configuration saved successfully!")
             
         except Exception as e:
-            self.log_debug(f"Cannot generate links: {str(e)}")
+            self.logger.error(f"Failed to save room: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save room configuration: {str(e)}")
+
+    def load_room_dialog(self):
+        """Show dialog to load room configuration"""
+        try:
+            # Get file path
+            file_path = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Load Room Configuration"
+            )
             
+            if not file_path:
+                return
+                
+            # Load from file
+            with open(file_path, 'r') as f:
+                room_data = json.load(f)
+            
+            # Update settings first
+            self.settings.room.from_dict(room_data)
+            
+            # Update UI with loaded settings
+            self.room_config.set_room_name(self.settings.room.room_name)
+            self.room_config.set_room_password(self.settings.room.room_password)
+            
+            # Update host fields
+            self.host_entry['name'].delete(0, tk.END)
+            self.host_entry['name'].insert(0, self.settings.room.host_username)
+            self.host_entry['character'].delete(0, tk.END)
+            self.host_entry['character'].insert(0, self.settings.room.host_character)
+            
+            # Clear existing players
+            for entry in self.player_entries:
+                entry['frame'].destroy()
+            self.player_entries.clear()
+            
+            # Add loaded players from settings
+            for name, character in self.settings.room.players.items():
+                # Create new player entry
+                player_frame = ttk.Frame(self.scrollable_frame)
+                player_frame.pack(fill="x", padx=5, pady=2)
+                
+                # Player number
+                player_num = len(self.player_entries) + 1
+                ttk.Label(player_frame, text=f"Player {player_num}:", width=8).pack(side="left", padx=2)
+                
+                # Name entry
+                ttk.Label(player_frame, text="Name:", width=6).pack(side="left", padx=2)
+                name_entry = ttk.Entry(player_frame, width=20)
+                name_entry.insert(0, name)
+                name_entry.pack(side="left", padx=2)
+                
+                # Character entry
+                ttk.Label(player_frame, text="Character:", width=10).pack(side="left", padx=2)
+                char_entry = ttk.Entry(player_frame, width=20)
+                char_entry.insert(0, character)
+                char_entry.pack(side="left", padx=2)
+                
+                # Buttons frame
+                btn_frame = ttk.Frame(player_frame)
+                btn_frame.pack(side="right", padx=2)
+                
+                # Delete button
+                delete_btn = ttk.Button(btn_frame, text="Delete",
+                                      command=lambda f=player_frame, n=name_entry, c=char_entry:
+                                      self.delete_player_entry(f, n, c))
+                delete_btn.pack(side="left", padx=2)
+                
+                # Store references
+                self.player_entries.append({
+                    'frame': player_frame,
+                    'name': name_entry,
+                    'character': char_entry
+                })
+                
+                # Bind events
+                name_entry.bind('<KeyRelease>', lambda e: self.generate_links())
+                char_entry.bind('<KeyRelease>', lambda e: self.generate_links())
+            
+            # Generate links for loaded configuration
+            self.generate_links()
+            messagebox.showinfo("Success", "Room configuration loaded successfully!")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load room: {str(e)}")
+            messagebox.showerror("Error", f"Failed to load room configuration: {str(e)}")
+
     def connect_to_obs(self):
         """Try to connect to OBS"""
         if self.settings.interface.enable_obs:
@@ -535,133 +671,230 @@ Tips:
                     port=self.settings.obs.port,
                     password=self.settings.obs.password
                 )
-                self.log_debug("Successfully connected to OBS")
+                self.logger.info("Successfully connected to OBS")
             except Exception as e:
-                self.log_debug(f"Failed to connect to OBS: {str(e)}")
+                self.logger.error(f"Failed to connect to OBS: {str(e)}")
         else:
-            self.log_debug("OBS integration is disabled")
+            self.logger.info("OBS integration is disabled")
             
-    def update_obs_sources(self):
-        """Update OBS sources with current links"""
+    def update_obs_sources(self, links=None):
+        """Update OBS sources with the current links"""
         try:
-            links = {}
-            self.log_debug("Starting to collect links...")
+            self.logger.info("Starting to update OBS sources...")
+            if not hasattr(self, 'obs_manager') or self.obs_manager is None:
+                self.logger.info("OBS manager not initialized, skipping source update")
+                return
             
-            # Get host/director link first
-            host_link = self.settings.room.get_host_link()
-            if host_link:
-                links["director"] = host_link
-                self.log_debug("Added host/director link")
-            else:
-                self.log_debug("Warning: No host link found")
+            if links is None:
+                links = self.generate_links()
             
-            # Get player links
-            for username in self.settings.room.players:
-                try:
-                    player_link = self.settings.room.get_player_link(username)
-                    if player_link:
-                        links[username] = player_link
-                        self.log_debug(f"Added link for player: {username}")
-                    else:
-                        self.log_debug(f"Warning: No link generated for player {username}")
-                except Exception as e:
-                    self.log_debug(f"Error generating link for player {username}: {str(e)}")
+            self.obs_manager.update_sources(links)
+            self.logger.info("Successfully updated OBS sources")
             
-            if links:
-                self.log_debug(f"Found links for: {', '.join(links.keys())}")
-                try:
-                    self.obs_manager.update_sources(links)
-                    self.log_debug("Successfully updated OBS sources")
-                except Exception as e:
-                    error_msg = f"Failed to update OBS sources: {str(e)}"
-                    self.log_debug(error_msg)
-                    if hasattr(e, '__traceback__'):
-                        import traceback
-                        self.log_debug("Traceback:")
-                        self.log_debug(traceback.format_exc())
-                    messagebox.showerror("Error", error_msg)
-            else:
-                error_msg = "No links found to update OBS sources"
-                self.log_debug(error_msg)
-                messagebox.showerror("Error", error_msg)
+        except Exception as e:
+            self.logger.error(f"Failed to update OBS sources: {str(e)}")
+            if hasattr(traceback, 'format_exc'):
+                self.logger.error(traceback.format_exc())
+    
+    def update_obs_sources_manual(self):
+        """Manually update OBS sources and host label"""
+        try:
+            # Generate links first
+            self.generate_links()
+            
+            if self.obs_manager and self.obs_manager.is_connected():
+                # Get host name
+                host_name = ""
+                if hasattr(self, 'host_entry'):
+                    host_name = self.host_entry['name'].get().strip()
                 
+                # Update host label in OBS
+                if host_name:
+                    self.obs_manager.update_text_source("p0name", host_name)
+                
+                messagebox.showinfo("Success", "OBS sources and labels updated!")
+            else:
+                messagebox.showwarning("Warning", "OBS is not connected. Please check connection settings.")
         except Exception as e:
-            error_msg = f"Failed to update OBS sources: {str(e)}"
-            self.log_debug(error_msg)
-            if hasattr(e, '__traceback__'):
-                import traceback
-                self.log_debug("Traceback:")
-                self.log_debug(traceback.format_exc())
-            messagebox.showerror("Error", error_msg)
-    
-    def copy_html_links(self):
-        """Copy links in HTML format"""
-        html_links = ["<h2>VDO.Ninja Links</h2>", "<ul>"]
-        for item_id in self.links_list.get_children():
-            desc = self.links_list.item(item_id)["text"]
-            link = self.links_list.item(item_id)["values"][0]
-            html_links.append(f'<li><strong>{desc}:</strong> <a href="{link}">{link}</a></li>')
-        html_links.append("</ul>")
-        
-        self.root.clipboard_clear()
-        self.root.clipboard_append("\n".join(html_links))
-        messagebox.showinfo("Success", "HTML links copied to clipboard!")
-    
-    def copy_plain_links(self):
-        """Copy links in plain text format"""
-        plain_links = ["VDO.Ninja Links:"]
-        for item_id in self.links_list.get_children():
-            desc = self.links_list.item(item_id)["text"]
-            link = self.links_list.item(item_id)["values"][0]
-            plain_links.append(f"{desc}: {link}")
-        
-        self.root.clipboard_clear()
-        self.root.clipboard_append("\n".join(plain_links))
-        messagebox.showinfo("Success", "Plain text links copied to clipboard!")
-    
-    def log_debug(self, message):
-        """Log debug message with timestamp"""
+            self.logger.error(f"Failed to update OBS sources: {str(e)}")
+            messagebox.showerror("Error", f"Failed to update OBS sources: {str(e)}")
+
+    def copy_all_links(self, html=False):
+        """Copy all links to clipboard"""
         try:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log_message = f"{timestamp}: {message}"
+            links = self.generate_links()
             
-            # Update debug text
-            if hasattr(self, 'debug_text'):
-                self.debug_text.insert("1.0", log_message + "\n")
+            if html:
+                html_links = "\n".join(f'<a href="{url}">{name}</a>' for name, url in links.items())
+                self.root.clipboard_clear()
+                self.root.clipboard_append(html_links)
+                self.root.update()
+                messagebox.showinfo("Success", "All links copied to clipboard as HTML!")
+            else:
+                plain_links = "\n".join(f"{name}: {url}" for name, url in links.items())
+                self.root.clipboard_clear()
+                self.root.clipboard_append(plain_links)
+                self.root.update()
+                messagebox.showinfo("Success", "All links copied to clipboard!")
             
-            # Write to log file
-            with open(self.debug_log_path, 'a') as f:
-                f.write(log_message + "\n")
         except Exception as e:
-            print(f"Error writing debug log: {str(e)}")
-    
+            messagebox.showerror("Error", f"Failed to copy links: {str(e)}")
+
+    def copy_player_link(self, username: str, character: str, as_html=False):
+        """Copy a player's link to clipboard"""
+        try:
+            # Get room name
+            room_name = self.room_config.get_room_name()
+            if not room_name:
+                raise ValueError("Room name is not set")
+            
+            # Build URL parameters
+            params = {
+                "room": room_name,
+                "username": username,
+                "quality": "1080p",
+                "meshcast": "1"
+            }
+            
+            # Only add password if it exists
+            password = self.room_config.get_room_password()
+            if password:
+                params["password"] = password
+            
+            # Add character if provided
+            if character:
+                params["character"] = character
+            
+            # Generate URL
+            url = "https://vdo.ninja/?" + "&".join(f"{k}={v}" for k, v in params.items())
+            
+            # Copy to clipboard
+            if as_html:
+                html = f'<a href="{url}">Link for {username}</a>'
+                self.root.clipboard_clear()
+                self.root.clipboard_append(html)
+                self.root.update()
+                messagebox.showinfo("Success", f"Link for {username} copied to clipboard as HTML!")
+            else:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(url)
+                self.root.update()
+                messagebox.showinfo("Success", f"Link for {username} copied to clipboard!")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to copy link: {str(e)}")
+
+    def copy_host_link(self, as_html=False):
+        """Copy the host link to clipboard"""
+        try:
+            # Get room name
+            room_name = self.room_config.get_room_name()
+            if not room_name:
+                raise ValueError("Room name is not set")
+            
+            # Build URL parameters
+            params = {
+                "room": room_name,
+                "director": "1",
+                "quality": "1080p",
+                "meshcast": "1"
+            }
+            
+            # Only add password if it exists
+            password = self.room_config.get_room_password()
+            if password:
+                params["password"] = password
+            
+            # Add host name if provided
+            if hasattr(self, 'host_entry'):
+                host_name = self.host_entry['name'].get().strip()
+                if host_name:
+                    params["username"] = host_name
+            
+            # Add host character if provided
+            if hasattr(self, 'host_entry'):
+                host_char = self.host_entry['character'].get().strip()
+                if host_char:
+                    params["character"] = host_char
+            
+            # Generate URL
+            url = "https://vdo.ninja/?" + "&".join(f"{k}={v}" for k, v in params.items())
+            
+            # Copy to clipboard
+            if as_html:
+                html = f'<a href="{url}">Host Link</a>'
+                self.root.clipboard_clear()
+                self.root.clipboard_append(html)
+                self.root.update()
+                messagebox.showinfo("Success", "Host link copied to clipboard as HTML!")
+            else:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(url)
+                self.root.update()
+                messagebox.showinfo("Success", "Host link copied to clipboard!")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to copy host link: {str(e)}")
+
+    def log_debug(self, message: str):
+        """Write a debug message to the log"""
+        self.logger.info(message)
+        self.update_debug_info()
+
     def get_debug_info(self):
         """Get debug info"""
         # Check actual OBS connection state
         obs_connected = False
-        if hasattr(self, 'obs_manager'):
+        if hasattr(self, 'obs_manager') and self.obs_manager is not None:
             try:
                 obs_connected = self.obs_manager.is_connected()
             except Exception as e:
-                self.log_debug(f"Error checking OBS connection: {str(e)}")
+                self.logger.error(f"Error checking OBS connection: {str(e)}")
         
-        debug_info = [
+        # Build header info
+        header_info = [
             "=== VDO.Ninja Link Manager Debug Info ===",
             f"OBS Connected: {obs_connected}",
             f"OBS Host: {self.settings.obs.host}",
             f"OBS Port: {self.settings.obs.port}",
             "=== Debug Log ===",
-            self.debug_text.get("1.0", tk.END) if hasattr(self, 'debug_text') else ""
         ]
         
-        return "\n".join(debug_info)
-    
+        # Get log content
+        try:
+            with open(self.debug_log_path, 'r') as f:
+                log_content = f.read()
+        except Exception as e:
+            log_content = f"Error reading debug log: {str(e)}"
+        
+        return "\n".join(header_info + [log_content])
+
     def update_debug_info(self):
         """Update debug info display"""
         if hasattr(self, 'debug_text'):
-            self.debug_text.delete("1.0", tk.END)
-            self.debug_text.insert("1.0", self.get_debug_info())
+            self.debug_text.delete('1.0', tk.END)
+            self.debug_text.insert(tk.END, self.get_debug_info())
             
+    def copy_debug_info(self):
+        """Copy debug info to clipboard"""
+        debug_info = self.get_debug_info()
+        self.root.clipboard_clear()
+        self.root.clipboard_append(debug_info)
+        self.root.update()
+        messagebox.showinfo("Success", "Debug info copied to clipboard!")
+    
+    def clear_debug_log(self):
+        """Clear the debug log"""
+        try:
+            with open(self.debug_log_path, 'w') as f:
+                f.write("")
+            self.logger.info("Debug log cleared")
+            self.update_debug_info()
+            messagebox.showinfo("Success", "Debug log cleared!")
+        except Exception as e:
+            self.logger.error(f"Failed to clear debug log: {str(e)}")
+            messagebox.showerror("Error", f"Failed to clear debug log: {str(e)}")
+    
     def run(self):
         """Start the application"""
         self.root.mainloop()

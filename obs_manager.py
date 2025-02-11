@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Any
 from obswebsocket import obsws, requests, exceptions
 import logging
+import re
 
 class OBSManager:
     """Manages OBS WebSocket connection and source updates"""
@@ -11,7 +12,7 @@ class OBSManager:
         
         # Set up logging
         self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
+        self.logger.setLevel(logging.INFO)
         
         # Add file handler
         handler = logging.FileHandler('obs_debug.log')
@@ -23,28 +24,13 @@ class OBSManager:
         try:
             self.logger.info(f"Attempting to connect to OBS at {host}:{port}")
             
-            if password:
-                self.logger.debug("Password provided, attempting authenticated connection")
-            
-            # Create WebSocket client
+            # Create WebSocket client and connect
             self.ws = obsws(host=host, port=port, password=password)
-            self.logger.debug("OBS WebSocket client created, attempting connection...")
-            
-            # Connect to OBS
             self.ws.connect()
-            self.logger.info("Connected to OBS WebSocket")
             
             # Test connection by getting version
-            self.logger.debug("Testing connection by getting OBS version...")
             version = self.ws.call(requests.GetVersion())
             self.logger.info(f"Connected to OBS {version.getObsVersion()}")
-            
-            # Test scene access
-            self.logger.debug("Testing scene access...")
-            scenes = self.ws.call(requests.GetSceneList())
-            self.logger.info(f"Successfully retrieved {len(scenes.getScenes())} scenes")
-            for scene in scenes.getScenes():
-                self.logger.debug(f"Found scene: {scene['sceneName']}")
             
             self.connected = True
             return True
@@ -75,9 +61,15 @@ class OBSManager:
                 return False
                 
             # Test connection by getting version
-            version = self.ws.call(requests.GetVersion())
-            self.connected = True
-            return True
+            try:
+                version = self.ws.call(requests.GetVersion())
+                self.connected = True
+                return True
+            except:
+                self.connected = False
+                self.ws = None
+                return False
+                
         except Exception as e:
             self.logger.error(f"Connection test failed: {str(e)}")
             self.connected = False
@@ -91,7 +83,6 @@ class OBSManager:
             
         try:
             self.ws.call(requests.SetTextGDIPlusProperties(source=source_name, text=text))
-            self.logger.debug(f"Updated text source {source_name} with text: {text}")
             return True
         except Exception as e:
             self.logger.error(f"Failed to update text source {source_name}: {str(e)}")
@@ -105,99 +96,87 @@ class OBSManager:
         try:
             settings = {"url": url}
             self.ws.call(requests.SetSourceSettings(sourceName=source_name, sourceSettings=settings))
-            self.logger.debug(f"Updated browser source {source_name} with URL: {url}")
             return True
         except Exception as e:
             self.logger.error(f"Failed to update browser source {source_name}: {str(e)}")
             return False
     
-    def update_all_sources(self, sources: Dict[str, Dict[str, Any]]) -> None:
-        """Update multiple OBS sources"""
-        if not self.connected:
-            return
-            
-        for source_name, data in sources.items():
-            if "text" in data:
-                self.update_text_source(source_name, data["text"])
-            elif "url" in data:
-                self.update_browser_source(source_name, data["url"])
-    
     def update_sources(self, links: Dict[str, str]) -> None:
-        """Update OBS sources with the provided links"""
+        """Update OBS sources with current links"""
         try:
-            # Ensure VDO Assets scene exists
-            vdo_scene = self.ensure_scene_exists("VDO Assets")
-            self.logger.info("Starting source update process...")
+            if not self.ws or not self.connected:
+                self.logger.error("Not connected to OBS")
+                return
+                
+            self.logger.info("Checking if VDO Assets scene exists...")
             
-            # Get current sources
-            try:
-                scene_items = self.ws.call(requests.GetSceneItemList(sceneName="VDO Assets")).getSceneItems()
-                current_sources = {item["sourceName"] for item in scene_items}
-                self.logger.debug(f"Current sources in VDO Assets: {', '.join(current_sources)}")
-            except Exception as e:
-                self.logger.error(f"Failed to get current sources: {str(e)}")
-                raise
+            # Get or create VDO Assets scene
+            scene_name = "VDO Assets"
+            self._get_or_create_scene(scene_name)
             
-            # Update director/host source
-            if "director" in links:
-                try:
-                    host_source = "p0vdosolo"  # Host is player 0
-                    host_name = "p0name"
-                    self.logger.info(f"Processing host source: {host_source}")
-                    self.logger.debug(f"Host link: {links['director']}")
-                    
-                    # Create or update browser source
-                    self.create_or_update_browser_source(host_source, links["director"])
-                    if host_source not in current_sources:
-                        self.ensure_source_in_scene(host_source, "VDO Assets")
-                    
-                    # Create or update text source
-                    self.create_or_update_text_source(host_name, "Host")
-                    if host_name not in current_sources:
-                        self.ensure_source_in_scene(host_name, "VDO Assets")
-                except Exception as e:
-                    self.logger.error(f"Failed to update host sources: {str(e)}")
-                    raise
+            # Process host source
+            self.logger.info("Processing host source...")
+            self._update_host_source(links['director'])
             
-            # Update player sources
-            player_count = 1
+            # Process player sources
+            player_num = 1
             for username, link in links.items():
                 if username != "director":
-                    try:
-                        self.logger.info(f"Processing player {player_count}: {username}")
-                        
-                        # Create source names based on player number
-                        vdo_source = f"p{player_count}vdosolo"
-                        name_source = f"p{player_count}name"
-                        
-                        self.logger.debug(f"Creating/updating sources for player {player_count}:")
-                        self.logger.debug(f"- Video source: {vdo_source}")
-                        self.logger.debug(f"- Name source: {name_source}")
-                        
-                        # Create or update browser source
-                        self.create_or_update_browser_source(vdo_source, link)
-                        if vdo_source not in current_sources:
-                            self.ensure_source_in_scene(vdo_source, "VDO Assets")
-                        
-                        # Create or update text source
-                        self.create_or_update_text_source(name_source, username)
-                        if name_source not in current_sources:
-                            self.ensure_source_in_scene(name_source, "VDO Assets")
-                        
-                        player_count += 1
-                    except Exception as e:
-                        self.logger.error(f"Failed to update sources for player {username}: {str(e)}")
-                        raise
+                    self.logger.info(f"Processing player {player_num}...")
+                    self._update_player_source(player_num, link)
+                    player_num += 1
             
-            self.logger.info(f"Successfully updated {player_count-1} player sources")
+            self.logger.info(f"Successfully updated {player_num - 1} player sources")
             
         except Exception as e:
-            self.logger.error(f"Failed to update sources: {str(e)}")
-            self.logger.error(f"Exception type: {type(e).__name__}")
-            if hasattr(e, '__traceback__'):
-                import traceback
-                self.logger.error("Traceback:")
-                self.logger.error(traceback.format_exc())
+            self.logger.error(f"Error updating sources: {str(e)}")
+            raise
+    
+    def _get_or_create_scene(self, scene_name: str) -> str:
+        """Get or create a scene"""
+        try:
+            # Get scene list
+            scene_list = self.ws.call(requests.GetSceneList())
+            scenes = scene_list.getScenes()
+            
+            # Check if scene exists
+            if any(scene['sceneName'] == scene_name for scene in scenes):
+                self.logger.info(f"{scene_name} scene already exists")
+                return scene_name
+            
+            # Create scene if it doesn't exist
+            self.ws.call(requests.CreateScene(sceneName=scene_name))
+            self.logger.info(f"Created {scene_name} scene")
+            return scene_name
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get or create scene {scene_name}: {str(e)}")
+            raise
+    
+    def _update_host_source(self, link: str) -> None:
+        """Update host source"""
+        try:
+            # Update browser source for host video
+            self.update_browser_source("p0vdosolo", link)
+            
+            # Update text source for host name
+            self.update_text_source("p0name", "Host")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to update host source: {str(e)}")
+            raise
+    
+    def _update_player_source(self, player_num: int, link: str) -> None:
+        """Update player source"""
+        try:
+            # Update browser source for player video
+            self.update_browser_source(f"p{player_num}vdosolo", link)
+            
+            # Update text source for player name
+            self.update_text_source(f"p{player_num}name", f"Player {player_num}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to update player {player_num} source: {str(e)}")
             raise
     
     def ensure_scene_exists(self, scene_name: str) -> str:
@@ -247,8 +226,8 @@ class OBSManager:
             self.logger.error(f"Failed to ensure source {source_name} exists in scene {scene_name}: {str(e)}")
             raise
 
-    def create_or_update_browser_source(self, source_name: str, url: str) -> None:
-        """Create or update a browser source with the given URL"""
+    def ensure_browser_source(self, source_name: str, url: str) -> None:
+        """Ensure a browser source exists with the given URL"""
         try:
             settings = {
                 "url": url,
@@ -273,11 +252,11 @@ class OBSManager:
                 ))
             
         except Exception as e:
-            self.logger.error(f"Failed to create/update browser source {source_name}: {str(e)}")
+            self.logger.error(f"Failed to ensure browser source {source_name}: {str(e)}")
             raise
-    
-    def create_or_update_text_source(self, source_name: str, text: str) -> None:
-        """Create or update a text source with the given text"""
+
+    def ensure_text_source(self, source_name: str, text: str) -> None:
+        """Ensure a text source exists with the given text"""
         try:
             settings = {
                 "text": text,
@@ -308,7 +287,7 @@ class OBSManager:
                 ))
             
         except Exception as e:
-            self.logger.error(f"Failed to create/update text source {source_name}: {str(e)}")
+            self.logger.error(f"Failed to ensure text source {source_name}: {str(e)}")
             raise
 
     def update_source(self, source_name: str, settings: dict):
